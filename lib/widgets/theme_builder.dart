@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fluffychat/utils/color_value.dart';
+import 'package:fluffychat/utils/window_theme_manager.dart';
 
 class ThemeBuilder extends StatefulWidget {
   final Widget Function(
@@ -48,12 +49,18 @@ class ThemeController extends State<ThemeBuilder> {
     final rawThemeMode = preferences.getString(widget.themeModeSettingsKey);
     final rawColor = preferences.getInt(widget.primaryColorSettingsKey);
 
+    ThemeMode? loadedThemeMode;
     setState(() {
       _themeMode = ThemeMode.values.singleWhereOrNull(
         (value) => value.name == rawThemeMode,
       );
+      loadedThemeMode = _themeMode;
       _primaryColor = rawColor == null ? null : Color(rawColor);
     });
+
+    if (loadedThemeMode != null) {
+      WindowThemeManager.instance.setThemeMode(loadedThemeMode!);
+    }
   }
 
   Future<void> setThemeMode(ThemeMode newThemeMode) async {
@@ -63,6 +70,7 @@ class ThemeController extends State<ThemeBuilder> {
     setState(() {
       _themeMode = newThemeMode;
     });
+    WindowThemeManager.instance.setThemeMode(newThemeMode);
   }
 
   Future<void> setPrimaryColor(Color? newPrimaryColor) async {
@@ -89,11 +97,16 @@ class ThemeController extends State<ThemeBuilder> {
 
   @override
   Widget build(BuildContext context) {
+    final effectivePrimaryColor = primaryColor;
+
     return Provider(
       create: (_) => this,
       child: DynamicColorBuilder(
-        builder: (light, _) =>
-            widget.builder(context, themeMode, primaryColor ?? light?.primary),
+        builder: (light, _) => widget.builder(
+          context,
+          themeMode,
+          effectivePrimaryColor ?? light?.primary,
+        ),
       ),
     );
   }

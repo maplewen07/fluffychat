@@ -10,6 +10,8 @@ import 'package:fluffychat/config/themes.dart';
 import 'package:fluffychat/l10n/l10n.dart';
 import 'package:fluffychat/widgets/app_lock.dart';
 import 'package:fluffychat/widgets/theme_builder.dart';
+import 'package:fluffychat/widgets/window_title_bar.dart';
+import 'package:fluffychat/utils/platform_infos.dart';
 import '../utils/custom_scroll_behaviour.dart';
 import 'matrix.dart';
 
@@ -55,17 +57,28 @@ class FluffyChatApp extends StatelessWidget {
         localizationsDelegates: L10n.localizationsDelegates,
         supportedLocales: L10n.supportedLocales,
         routerConfig: router,
-        builder: (context, child) => AppLockWidget(
-          pincode: pincode,
-          clients: clients,
-          // Need a navigator above the Matrix widget for
-          // displaying dialogs
-          child: Matrix(
+        builder: (context, child) {
+          final appContent = AppLockWidget(
+            pincode: pincode,
             clients: clients,
-            store: store,
-            child: testWidget ?? child,
-          ),
-        ),
+            // Need a navigator above the Matrix widget for
+            // displaying dialogs
+            child: Matrix(
+              clients: clients,
+              store: store,
+              child: testWidget ?? child,
+            ),
+          );
+          if (!PlatformInfos.isWindows) {
+            return appContent;
+          }
+          return Column(
+            children: [
+              const WindowTitleBar(),
+              Expanded(child: appContent),
+            ],
+          );
+        },
       ),
     );
   }

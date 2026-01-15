@@ -2,6 +2,7 @@ import 'dart:isolate';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'package:collection/collection.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -13,13 +14,40 @@ import 'package:fluffychat/config/app_config.dart';
 import 'package:fluffychat/utils/client_manager.dart';
 import 'package:fluffychat/utils/notification_background_handler.dart';
 import 'package:fluffychat/utils/platform_infos.dart';
+import 'package:fluffychat/utils/window_theme_manager.dart';
 import 'config/setting_keys.dart';
 import 'utils/background_push.dart';
 import 'widgets/fluffy_chat_app.dart';
 
 ReceivePort? mainIsolateReceivePort;
 
-void main() async {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // ✅ 1) Windows：尽早初始化窗口管理，并设置边框/标题栏暗色
+  if (PlatformInfos.isWindows) {
+    await windowManager.ensureInitialized();
+
+    const windowOptions = WindowOptions(
+      size: Size(1200, 800),
+      minimumSize: Size(800, 600),
+      center: true,
+      backgroundColor: Colors.transparent,
+      titleBarStyle: TitleBarStyle.hidden, // 🔥 关键
+    );
+
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.setResizable(true);
+      await windowManager.setMinimizable(true);
+      await windowManager.setMaximizable(true);
+      await windowManager.show();
+      await windowManager.focus();
+    });
+
+    WindowThemeManager.instance.init();
+  }
+
+  // ✅ 2) 你原来的 Android isolate 逻辑保持不变
   if (PlatformInfos.isAndroid) {
     final port = mainIsolateReceivePort = ReceivePort();
     IsolateNameServer.removePortNameMapping(AppConfig.mainIsolatePortName);
@@ -30,11 +58,6 @@ void main() async {
     await waitForPushIsolateDone();
   }
 
-  // Our background push shared isolate accesses flutter-internal things very early in the startup proccess
-  // To make sure that the parts of flutter needed are started up already, we need to ensure that the
-  // widget bindings are initialized already.
-  WidgetsFlutterBinding.ensureInitialized();
-
   final store = await AppSettings.init();
   Logs().i('Welcome to ${AppSettings.applicationName.value} <3');
 
@@ -43,21 +66,13 @@ void main() async {
   Logs().nativeColors = !PlatformInfos.isIOS;
   final clients = await ClientManager.getClients(store: store);
 
-  // If the app starts in detached mode, we assume that it is in
-  // background fetch mode for processing push notifications. This is
-  // currently only supported on Android.
   if (PlatformInfos.isAndroid &&
       AppLifecycleState.detached == WidgetsBinding.instance.lifecycleState) {
-    // Do not send online presences when app is in background fetch mode.
     for (final client in clients) {
       client.backgroundSync = false;
       client.syncPresence = PresenceType.offline;
     }
-
-    // In the background fetch mode we do not want to waste ressources with
-    // starting the Flutter engine but process incoming push notifications.
     BackgroundPush.clientOnly(clients.first);
-    // To start the flutter engine afterwards we add an custom observer.
     WidgetsBinding.instance.addObserver(AppStarter(clients, store));
     Logs().i(
       '${AppSettings.applicationName.value} started in background-fetch mode. No GUI will be created unless the app is no longer detached.',
@@ -65,16 +80,14 @@ void main() async {
     return;
   }
 
-  // Started in foreground mode.
   Logs().i(
     '${AppSettings.applicationName.value} started in foreground mode. Rendering GUI...',
   );
+
   await startGui(clients, store);
 }
 
-/// Fetch the pincode for the applock and start the flutter engine.
 Future<void> startGui(List<Client> clients, SharedPreferences store) async {
-  // Fetch the pin for the applock if existing for mobile applications.
   String? pin;
   if (PlatformInfos.isMobile) {
     try {
@@ -86,7 +99,6 @@ Future<void> startGui(List<Client> clients, SharedPreferences store) async {
     }
   }
 
-  // Preload first client
   final firstClient = clients.firstOrNull;
   await firstClient?.roomsLoading;
   await firstClient?.accountDataLoading;
@@ -94,8 +106,6 @@ Future<void> startGui(List<Client> clients, SharedPreferences store) async {
   runApp(FluffyChatApp(clients: clients, pincode: pin, store: store));
 }
 
-/// Watches the lifecycle changes to start the application when it
-/// is no longer detached.
 class AppStarter with WidgetsBindingObserver {
   final List<Client> clients;
   final SharedPreferences store;
@@ -111,13 +121,11 @@ class AppStarter with WidgetsBindingObserver {
     Logs().i(
       '${AppSettings.applicationName.value} switches from the detached background-fetch mode to ${state.name} mode. Rendering GUI...',
     );
-    // Switching to foreground mode needs to reenable send online sync presence.
     for (final client in clients) {
       client.backgroundSync = true;
       client.syncPresence = PresenceType.online;
     }
     startGui(clients, store);
-    // We must make sure that the GUI is only started once.
     guiStarted = true;
   }
 }
